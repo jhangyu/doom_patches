@@ -2,6 +2,14 @@ package app.template.patches.shared.gms
 
 import app.morphe.patcher.Fingerprint
 import com.android.tools.smali.dexlib2.AccessFlags
+import com.android.tools.smali.dexlib2.iface.Method
+
+/**
+ * Play services availability checks take (Context, int) in most SDK builds and (int, Context)
+ * in others (e.g. FlightAware 5.16.3 GooglePlayServicesUtil). Accept either order.
+ */
+private fun Method.hasContextAndIntParameters(): Boolean =
+    parameterTypes.map { it.toString() }.sorted() == listOf("I", "Landroid/content/Context;")
 
 /**
  * static void(Context, int) — throws "Google Play Services not available" when GMS is absent.
@@ -15,7 +23,7 @@ internal val ServiceCheckFingerprint = Fingerprint(
 )
 
 /**
- * static int(Context, int) — returns Play Services version code.
+ * static int(Context, int) or int(int, Context) — returns Play Services version code.
  * Callers ignore a 0 return, so returning 0 early is safe and prevents GMS-absent crashes.
  * Note: the string anchors were removed from Google Photos in 7.86+, so this only matches
  * apps that still bundle the old GooglePlayServicesUtilLight.
@@ -23,16 +31,16 @@ internal val ServiceCheckFingerprint = Fingerprint(
 internal val GooglePlayUtilityFingerprint = Fingerprint(
     accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.STATIC),
     returnType = "I",
-    parameters = listOf("L", "I"),
     strings = listOf(
         "This should never happen.",
         "MetadataValueReader",
         "com.google.android.gms",
     ),
+    custom = { method, _ -> method.hasContextAndIntParameters() },
 )
 
 /**
- * static int(Context, int) — GoogleApiAvailabilityLight.isGooglePlayServicesAvailable equivalent.
+ * static int(Context, int) or int(int, Context) — GoogleApiAvailabilityLight.isGooglePlayServicesAvailable equivalent.
  * Returns a ConnectionResult status code (0 == SUCCESS); some bundled Maps SDKs gate map/place
  * initialization on it (e.g. Google Photos' "Map"/"Places" crashes with
  * "IBitmapDescriptorFactory is not initialized" when the check fails for MicroG, which is not
@@ -43,9 +51,9 @@ internal val GooglePlayUtilityFingerprint = Fingerprint(
 internal val IsGooglePlayServicesAvailableFingerprint = Fingerprint(
     accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.STATIC),
     returnType = "I",
-    parameters = listOf("L", "I"),
     strings = listOf(
         "com.google.android.gms.version",
         "com.google.app.id",
     ),
+    custom = { method, _ -> method.hasContextAndIntParameters() },
 )

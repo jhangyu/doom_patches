@@ -1,6 +1,7 @@
 package app.template.patches.shared.gms
 
 import app.morphe.patcher.Fingerprint
+import app.morphe.patcher.patch.PatchException
 import app.morphe.patcher.extensions.InstructionExtensions.addInstruction
 import app.morphe.patcher.extensions.InstructionExtensions.replaceInstruction
 import app.morphe.patcher.patch.bytecodePatch
@@ -566,14 +567,24 @@ val gmsCoreVendorOption by stringOption(
 
         ServiceCheckFingerprint.methodOrNull?.addInstruction(0, "return-void")
 
-        // Return CONNECTION_SUCCESS (0) for GPS availability checks.
-        GooglePlayUtilityFingerprint.methodOrNull?.let { method ->
-            method.addInstruction(0, "return v0")
-            method.addInstruction(0, "const/4 v0, 0x0")
+        // Return CONNECTION_SUCCESS (0) for GPS availability checks. DynamiteModule and the
+        // GMS API clients route through this check; if it stays, the client rejects the
+        // non-Google-signed GmsCore with SERVICE_INVALID, so a miss must fail the build.
+        val availabilityChecks = listOf(
+            GooglePlayUtilityFingerprint,
+            IsGooglePlayServicesAvailableFingerprint,
+        ).mapNotNull { it.methodOrNull }.distinctBy { "${it.definingClass}->${it.name}${it.parameterTypes}" }
+        if (availabilityChecks.isEmpty()) {
+            throw PatchException(
+                "GmsCore support: neither GooglePlayUtilityFingerprint nor " +
+                    "IsGooglePlayServicesAvailableFingerprint matched in $originalPackageName " +
+                    "(expected a public static int isGooglePlayServicesAvailable(Context, int) or (int, Context)).",
+            )
         }
-        IsGooglePlayServicesAvailableFingerprint.methodOrNull?.let { method ->
+        availabilityChecks.forEach { method ->
             method.addInstruction(0, "return v0")
             method.addInstruction(0, "const/4 v0, 0x0")
+            println("GmsCore: availability check ${method.definingClass}->${method.name} returns 0.")
         }
 
         // Patch extension: getGmsCoreVendorGroupId() → return "<vendor group>"
